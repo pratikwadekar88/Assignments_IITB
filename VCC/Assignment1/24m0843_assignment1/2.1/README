@@ -1,0 +1,3 @@
+Just run spock.sh run,everything will run automatically.
+Use ./spock.sh
+If you have to change the count then you can modify it from the spock.sh script.

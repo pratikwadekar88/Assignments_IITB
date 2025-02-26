@@ -1,0 +1,5 @@
+If any command gives permission issue, then change ownership 
+of the module/driver using following command,
+
+sudo chown $USER /sys/kernel/mem_stats/pid
+sudo chown $USER /sys/kernel/mem_stats/unit

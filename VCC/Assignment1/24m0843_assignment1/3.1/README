@@ -1,0 +1,6 @@
+If you run script.sh script, kernel file module will compile
+and it will insert module into kernel.
+It will print output using custom module as well as
+default module.
+
+You can also compile manually and check.

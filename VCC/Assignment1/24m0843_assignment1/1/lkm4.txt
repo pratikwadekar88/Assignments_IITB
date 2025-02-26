@@ -1,0 +1,9 @@
+In this analysis, I observed that as the stride size increases, 
+the physical memory allocated to the process decreases gradually.
+For a stride of 4096 bytes, the physical memory allocation is the highest.
+Even as the number of pages allocated to the process increases (representing
+the allocation of virtual memory), the physical memory usage remains almost 
+the same for a given stride. This is because physical pages are only allocated 
+when the memory is accessed. With larger strides, more pages are skipped 
+during access, resulting in fewer physical pages being allocated compared 
+to smaller stride sizes.

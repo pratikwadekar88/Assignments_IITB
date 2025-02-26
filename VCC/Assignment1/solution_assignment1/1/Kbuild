@@ -1,0 +1,2 @@
+ccflags-y := -std=gnu99 -Wno-declaration-after-statement
+obj-m = lkm1.o lkm2.o lkm3.o lkm4.o lkm5.o
