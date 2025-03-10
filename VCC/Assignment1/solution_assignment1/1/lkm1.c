@@ -1,33 +1,34 @@
-#include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/sched/signal.h>
 
 // Module description, author, and license information
-MODULE_DESCRIPTION("LKM1");
+MODULE_DESCRIPTION("LKM1") // It is used to describe the module
 MODULE_AUTHOR("CS695");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL"); // It is set to GPL to indicate that the module is
+                       // open-source and there are other licenses available
 
 // Initialization function to print runnable processes
-static __init int print_runnable_processes(void)
-{
-	struct task_struct *task; // Pointer to iterate over task structures
-	pr_info("[LKM1] Runnable Processes:\n");
-	pr_info("[LKM1] PID\tPROC\n");
-	pr_info("[LKM1] ------------------\n");
-	for_each_process(task) { // Iterate over each process in the system
-		if (task_is_running(task)) { // Check if the process is runnable
-			pr_info("[LKM1] %d\t%s\n", task -> pid, task->comm); // Print PID and process name
-		}
-	}
-	return 0; // Return 0 to indicate successful initialization
+static __init int print_runnable_processes(void) {
+  struct task_struct *task; // Pointer to iterate over task structures
+  pr_info("[LKM1] Runnable Processes:\n");
+  pr_info("[LKM1] PID\tPROC\n");
+  pr_info("[LKM1] ------------------\n");
+  for_each_process(task) {       // Iterate over each process in the system
+    if (task_is_running(task)) { // Check if the process is runnable
+      pr_info("[LKM1] %d\t%s\n", task->pid,
+              task->comm); // Print PID and process name
+    }
+  }
+  return 0; // Return 0 to indicate successful initialization
 }
 
 // Exit function to clean up when the module is unloaded
-static __exit void exit_module(void)
-{
-	pr_info("[LKM1] Module LKM1 Unloaded\n"); // Log message indicating module unload
+static __exit void exit_module(void) {
+  pr_info(
+      "[LKM1] Module LKM1 Unloaded\n"); // Log message indicating module unload
 }
 
 // Specify initialization and exit functions
