@@ -209,15 +209,16 @@ build() {
     fi
 
     # Remove on implementation of 3.d.1 <---
-    cp -a "$CACHEDIR/base/$BASE_NAME/" "$IMAGEDIR/$NAME"
-    echo -e "\e[1;32mImage $NAME built without any layers\e[0m"
+    # cp -a "$CACHEDIR/base/$BASE_NAME/" "$IMAGEDIR/$NAME"
+    # echo -e "\e[1;32mImage $NAME built without any layers\e[0m"
     # Remove on implementation of 3.d.1 <---
 
+    # mkdir -p "$IMAGEDIR/$NAME
     # # Subtask 3.d.1 - start 
     # # Uncomment the below code to implement layering
     # # Store the base layer and the layer stack in the image directory to be used later
-    # local BASE_LAYER="$CACHEDIR/base/$BASE_NAME"
-    # local LAYER_STACK="$BASE_LAYER"
+    local BASE_LAYER=$(realpath "$CACHEDIR/base/$BASE_NAME")
+    local LAYER_STACK="$BASE_LAYER"
     
     # # For subtask 3.e and 3.f
     # while IFS= read -r instruction; do
@@ -225,9 +226,9 @@ build() {
     #     LAYER_STACK=$(update_layer_stack "$current_layer/diff" "$LAYER_STACK")
     # done < <(grep -E '^(RUN|COPY)' "$CONDUCTORFILE")
     
-    # mkdir -p "$IMAGEDIR/$NAME"
-    # echo "$LAYER_STACK" > "$IMAGEDIR/$NAME/layers"
-    # echo -e "\e[1;32mImage ${NAME:-} built with $(( $(echo "${LAYER_STACK}" | tr -dc ':' | wc -c) + 1 )) layers\e[0m"
+    mkdir -p "$IMAGEDIR/$NAME"
+    echo "$LAYER_STACK" > "$IMAGEDIR/$NAME/layers"
+    echo -e "\e[1;32mImage ${NAME:-} built with $(( $(echo "${LAYER_STACK}" | tr -dc ':' | wc -c) + 1 )) layers\e[0m"
     # Subtask 3.d.1 - end
 }
 
@@ -304,29 +305,34 @@ run() {
     [ -d "$CONTAINERDIR/$NAME" ] && die "Container $NAME already exists"
 
     # Remove on implementation of 3.d.2 <---
-    mkdir -p "$CONTAINERDIR/$NAME/rootfs"
-    cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
+    # mkdir -p "$CONTAINERDIR/$NAME/rootfs"
+    # cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
     # Remove on implementation of 3.d.2 <---
 
     # Subtask 3.d.2 - start
     # Create a new directory for the container rootfs
     # Read the layer stack from the image directory and mount the overlay filesystem
+    mkdir -p "$CONTAINERDIR/$NAME"/{upper,work,merged}
+    LOWER=$(cat "$IMAGEDIR/$IMAGE/layers")
+
+    mount -t overlay overlay -o lowerdir="$LOWER",upperdir="$CONTAINERDIR/$NAME/upper",workdir="$CONTAINERDIR/$NAME/work" "$CONTAINERDIR/$NAME/merged"
 
 
     # Subtask 3.d.2 - end
 
     shift 2
     # this is the init command that should be run within the container
-    local INIT_CMD_ARGS=${@:-/bin/bash} # if no command is given, then substitute by /bin/bash
+    local INIT_CMD_ARGS=${@:-/bin/bash -i} # if no command is given, then substitute by /bin/bash
 
-    CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/rootfs"
-    cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
+    # CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/rootfs"
+    # cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
     # Subtask 3.a.1
     # You should bind mount /dev within the container root fs
-    mount --bind /dev "$CONTAINER_ROOTFS/dev"
 
     # Subtask 3.d.3
     # Modify subtask 3.a.1 to bind mount /dev
+    CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/merged"
+    mount --bind /dev "$CONTAINER_ROOTFS/dev"
 
 
     # Subtask 3.a.2
@@ -337,9 +343,12 @@ run() {
     # - When unshare process exits all of its children also exit (--kill-child option)
     # - permission of root dir within container should be set to 755 for apt to work correctly
     # - $INIT_CMD_ARGS should be the entry program for the container
-    unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -c \"mount -t proc proc /proc && mount -t sysfs sys /sys && exec $INIT_CMD_ARGS\""
+    # unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -c \"mount -t proc proc /proc && mount -t sysfs sys /sys && exec $INIT_CMD_ARGS\""
     # Subtask 3.d.3
     # Modify subtask 3.a.2 to use the overlay filesystem
+    # unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -i -c 'mount -t proc proc /proc && mount -t sysfs sys /sys && exec \$INIT_CMD_ARGS'"
+    unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && mount -t proc proc $CONTAINER_ROOTFS/proc && mount -t sysfs sys $CONTAINER_ROOTFS/sys && chroot $CONTAINER_ROOTFS /bin/bash -i"
+
 
 }
 
@@ -372,7 +381,8 @@ stop() {
     # Subtask 3.d.3
     # Modify the below code to use the overlay filesystem
     # Lesson: Getting the pid of the entry process within the container
-    local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
+    # local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
+    local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/merged" | grep -v grep | awk '{print $2}')
     
 
     # Lesson: Delete the ip link created in host for the container
@@ -387,13 +397,18 @@ stop() {
     # Modify the below code to use the overlay filesystem
     # This is a comprehensive list of unmounts
     # You can remove any if not required depending on how you mounted them
-    umount "$CONTAINERDIR/$NAME/rootfs/proc" > /dev/null 2>&1 || :
-    umount "$CONTAINERDIR/$NAME/rootfs/sys" > /dev/null 2>&1 || :
-    umount "$CONTAINERDIR/$NAME/rootfs/dev" > /dev/null 2>&1 || :
+    # umount "$CONTAINERDIR/$NAME/rootfs/proc" > /dev/null 2>&1 || :
+    # umount "$CONTAINERDIR/$NAME/rootfs/sys" > /dev/null 2>&1 || :
+    # umount "$CONTAINERDIR/$NAME/rootfs/dev" > /dev/null 2>&1 || :
+
+    umount "$CONTAINERDIR/$NAME/merged/proc" > /dev/null 2>&1 || :
+    umount "$CONTAINERDIR/$NAME/merged/sys" > /dev/null 2>&1 || :
+    umount "$CONTAINERDIR/$NAME/merged/dev" > /dev/null 2>&1 || :
 
     # Subtask 3.d.4
     # Unmount the overlay filesystem
-    # umount "$CONTAINERDIR/$NAME/merged" > /dev/null 2>&1 || :
+    umount "$CONTAINERDIR/$NAME/merged" > /dev/null 2>&1 || :
+
 
     # Deletes the container file
     rm -rf "$CONTAINERDIR/$NAME"
@@ -421,7 +436,9 @@ exec() {
     # Subtask 3.d.3
     # Modify the below code to use the overlay filesystem
     # This is the PID of the unshare process for the given container
-    local UNSHARE_PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
+    # local UNSHARE_PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
+    local UNSHARE_PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/merged" | grep -v grep | awk '{print $2}')
+
     [ -z "$UNSHARE_PID" ] && die "Cannot find container process"
 
     # This is the PID of the process that unshare executed within the container
@@ -435,8 +452,10 @@ exec() {
     # The executed process should be within correct namespace and root
     # directory as of the container and tools like ps, top should show only processes
     # running within the containero
-    local CONTAINER_ROOTFS=$(realpath "$CONTAINERDIR/$NAME/rootfs")
-    nsenter --uts --pid --net --mount --ipc --target $CONTAINER_INIT_PID chroot "$CONTAINER_ROOTFS" $EXEC_CMD_ARGS
+    # local CONTAINER_ROOTFS=$(realpath "$CONTAINERDIR/$NAME/rootfs")
+    local CONTAINER_ROOTFS=$(realpath "$CONTAINERDIR/$NAME/merged")
+    # nsenter --uts --pid --net --mount --ipc --target $CONTAINER_INIT_PID chroot "$CONTAINER_ROOTFS" $EXEC_CMD_ARGS
+    nsenter --uts --pid --net --mount --ipc --target "$CONTAINER_INIT_PID" chroot "$CONTAINER_ROOTFS" $EXEC_CMD_ARGS
 
 
 
@@ -469,8 +488,9 @@ addnetwork() {
     fi
 
     # Subtask 3.d.3
-    # Modify the below code to use the overlay filesystem (Use only one pid)
-    local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
+    # # Modify the below code to use the overlay filesystem (Use only one pid)
+    # local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
+     local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/merged" | grep -v grep | awk '{print $2}')
 
     local CONDUCTORNS="/proc/$PID/ns/net"
     local NSDIR=$NETNSDIR/$NAME
