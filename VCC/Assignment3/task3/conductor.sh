@@ -155,19 +155,27 @@ handle_copy() {
     
     # Subtask 3.e.1
     # Create a new layer
+    local TEMP_DIR=$(mktemp -d)
+    mkdir -p "$TEMP_DIR"/{upper,work,merged}
+
 
 
     # Subtask 3.e.2
     # Temporarily mount the overlay filesystem
-
+    mount -t overlay overlay -o lowerdir="$parent_layers",upperdir="$TEMP_DIR/upper",workdir="$TEMP_DIR/work" "$TEMP_DIR/merged"
     
     # Subtask 3.e.3
     # Copy the files from source to destination
-
+    cp -a "$src" "$TEMP_DIR/merged/$dest"
     
     # Subtask 3.e.4
     # Unmount the overlay filesystem
+    umount "$TEMP_DIR/merged"
 
+    mkdir -p "$CACHEDIR/layers/$layer_hash"
+    mv "$TEMP_DIR/upper" "$CACHEDIR/layers/$layer_hash/diff"
+
+    rm -rf "$TEMP_DIR"
 
     # Record metadata and parent layer
     echo "COPY $src $dest" > "$CACHEDIR/layers/$layer_hash/metadata"
@@ -220,11 +228,11 @@ build() {
     local BASE_LAYER=$(realpath "$CACHEDIR/base/$BASE_NAME")
     local LAYER_STACK="$BASE_LAYER"
     
-    # # For subtask 3.e and 3.f
-    # while IFS= read -r instruction; do
-    #     process_instruction "$instruction" "$LAYER_STACK"
-    #     LAYER_STACK=$(update_layer_stack "$current_layer/diff" "$LAYER_STACK")
-    # done < <(grep -E '^(RUN|COPY)' "$CONDUCTORFILE")
+    # For subtask 3.e and 3.f
+    while IFS= read -r instruction; do
+        process_instruction "$instruction" "$LAYER_STACK"
+        LAYER_STACK=$(update_layer_stack "$current_layer/diff" "$LAYER_STACK")
+    done < <(grep -E '^(RUN|COPY)' "$CONDUCTORFILE")
     
     mkdir -p "$IMAGEDIR/$NAME"
     echo "$LAYER_STACK" > "$IMAGEDIR/$NAME/layers"
