@@ -94,6 +94,38 @@ update_layer_stack() {
 # Mount the overlay filesystem and execute the command
 # Unmount the overlay filesystem after executing the command
 # Record the metadata and parent layer for the new layer
+# handle_run() {
+#     local command="$1"
+#     local parent_layers="$2"
+#     local parent_hash=$(get_layer_hash "$parent_layers")
+    
+#     # Generate unique hash for this command
+#     local cmd_hash=$(echo "$command" | sha256sum | cut -d' ' -f1)
+#     local layer_hash=$(echo "RUN-${parent_hash}-${cmd_hash}" | sha256sum | cut -d' ' -f1)
+    
+#     # Check cache
+#     if [ -d "$CACHEDIR/layers/$layer_hash" ]; then
+#         echo "Using cached RUN layer: $layer_hash"
+#         current_layer="$CACHEDIR/layers/$layer_hash/diff"
+#         return
+#     fi
+    
+#     # Subtask 3.f.1
+#     # Create new layer
+
+
+#     # Subtask 3.f.2
+#     # Temporarily mount the overlay filesystem
+
+
+#     # Subtask 3.f.3
+#     # Execute the command in the new mount
+
+#     # Subtask 3.f.4
+#     # Cleanup and record metadata
+
+
+# }
 handle_run() {
     local command="$1"
     local parent_layers="$2"
@@ -110,22 +142,55 @@ handle_run() {
         return
     fi
     
-    # Subtask 3.f.1
-    # Create new layer
+    # Subtask 3.f.1: Create new layer (temporary directory)
+    local TEMP_DIR=$(mktemp -d)
+    TEMP_DIR=$(realpath "$TEMP_DIR")
     
+    # Subtask 3.f.2: Temporarily mount the overlay filesystem
+    mkdir -p "$TEMP_DIR"/{upper,work,merged}
+    local ABS_UPPER=$(realpath "$TEMP_DIR/upper")
+    local ABS_WORK=$(realpath "$TEMP_DIR/work")
+    local ABS_MERGED=$(realpath "$TEMP_DIR/merged")
+    
+    # CHANGE: Convert parent_layers to absolute path(s) (handle colon-separated values)
+    local ABS_PARENT=""
+    IFS=':' read -r -a layer_array <<< "$parent_layers"
+    for layer in "${layer_array[@]}"; do
+        local abs_layer
+        abs_layer=$(realpath "$layer")
+        if [ -z "$ABS_PARENT" ]; then
+            ABS_PARENT="$abs_layer"
+        else
+            ABS_PARENT="$ABS_PARENT:$abs_layer"
+        fi
+    done
 
-    # Subtask 3.f.2
-    # Temporarily mount the overlay filesystem
-    
+    # ADDITION: Check that ABS_PARENT is not empty for debugging.
+    [ -z "$ABS_PARENT" ] && die "ABS_PARENT is empty; parent_layers ($parent_layers) did not convert properly"
 
-    # Subtask 3.f.3
-    # Execute the command in the new mount
+    ABS_PARENT=$(echo "$ABS_PARENT" | sed 's|/diff/diff|/diff|g')
 
+    # Debug: Print ABS_PARENT to verify its value
+    echo "DEBUG: ABS_PARENT = $ABS_PARENT"
     
-    # Subtask 3.f.4
-    # Cleanup and record metadata
+    mount -t overlay overlay -o lowerdir="$ABS_PARENT",upperdir="$ABS_UPPER",workdir="$ABS_WORK" "$ABS_MERGED"
     
+    # Subtask 3.f.3: Execute the command in the new mount
+    chroot "$ABS_MERGED" /bin/bash -c "$command"
+    
+    # Subtask 3.f.4: Cleanup and record metadata
+    umount "$ABS_MERGED"
+    mkdir -p "$CACHEDIR/layers/$layer_hash"
+    mv "$ABS_UPPER" "$CACHEDIR/layers/$layer_hash/diff"
+    rm -rf "$TEMP_DIR"
+    echo "RUN $command" > "$CACHEDIR/layers/$layer_hash/metadata"
+    echo "$parent_hash" > "$CACHEDIR/layers/$layer_hash/parent"
+    
+    current_layer="$CACHEDIR/layers/$layer_hash"
+    echo "$current_layer" > "$CACHEDIR/layers/.last_layer"
 }
+
+
 
 # Subtask 3.e
 # Create a new layer for COPY instruction
@@ -158,8 +223,6 @@ handle_copy() {
     local TEMP_DIR=$(mktemp -d)
     mkdir -p "$TEMP_DIR"/{upper,work,merged}
 
-
-
     # Subtask 3.e.2
     # Temporarily mount the overlay filesystem
     mount -t overlay overlay -o lowerdir="$parent_layers",upperdir="$TEMP_DIR/upper",workdir="$TEMP_DIR/work" "$TEMP_DIR/merged"
@@ -180,7 +243,7 @@ handle_copy() {
     # Record metadata and parent layer
     echo "COPY $src $dest" > "$CACHEDIR/layers/$layer_hash/metadata"
     echo "$parent_hash" > "$CACHEDIR/layers/$layer_hash/parent"
-    current_layer="$CACHEDIR/layers/$layer_hash"
+    current_layer="relpath $CACHEDIR/layers/$layer_hash"
     echo "$current_layer" > "$CACHEDIR/layers/.last_layer"
 }
 
@@ -231,7 +294,9 @@ build() {
     # For subtask 3.e and 3.f
     while IFS= read -r instruction; do
         process_instruction "$instruction" "$LAYER_STACK"
-        LAYER_STACK=$(update_layer_stack "$current_layer/diff" "$LAYER_STACK")
+        # LAYER_STACK=$(update_layer_stack "$current_layer/diff" "$LAYER_STACK")
+        LAYER_STACK=$(update_layer_stack "$current_layer" "$LAYER_STACK")
+
     done < <(grep -E '^(RUN|COPY)' "$CONDUCTORFILE")
     
     mkdir -p "$IMAGEDIR/$NAME"
@@ -302,6 +367,63 @@ rmcache() {
 # You also need to mount appropriate filesystems to the rootfs within the container
 # to enable tools tools that utilize those filesystems e.g. ps, top, ifconfig etc. to
 # be confined within the container isolation
+# run() {
+#     local IMAGE=${1:-}
+#     local NAME=${2:-}
+
+#     [ -z "$NAME" ] && die "Container name is required"
+#     [ -z "$IMAGE" ] && die "Image name is required"
+
+#     [ -d "$IMAGEDIR/$IMAGE" ] || die "Image $IMAGE does not exist"
+#     [ -d "$CONTAINERDIR/$NAME" ] && die "Container $NAME already exists"
+
+#     # Remove on implementation of 3.d.2 <---
+#     # mkdir -p "$CONTAINERDIR/$NAME/rootfs"
+#     # cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
+#     # Remove on implementation of 3.d.2 <---
+
+#     # Subtask 3.d.2 - start
+#     # Create a new directory for the container rootfs
+#     # Read the layer stack from the image directory and mount the overlay filesystem
+#     mkdir -p "$CONTAINERDIR/$NAME"/{upper,work,merged}
+#     LOWER=$(cat "$IMAGEDIR/$IMAGE/layers")
+
+#     mount -t overlay overlay -o lowerdir="$LOWER",upperdir="$CONTAINERDIR/$NAME/upper",workdir="$CONTAINERDIR/$NAME/work" "$CONTAINERDIR/$NAME/merged"
+
+
+#     # Subtask 3.d.2 - end
+
+#     shift 2
+#     # this is the init command that should be run within the container
+#     local INIT_CMD_ARGS=${@:-/bin/bash -i} # if no command is given, then substitute by /bin/bash
+
+#     # CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/rootfs"
+#     # cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
+#     # Subtask 3.a.1
+#     # You should bind mount /dev within the container root fs
+
+#     # Subtask 3.d.3
+#     # Modify subtask 3.a.1 to bind mount /dev
+#     CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/merged"
+#     mount --bind /dev "$CONTAINER_ROOTFS/dev"
+
+
+#     # Subtask 3.a.2
+#     # - Use unshare to run the container in a new [uts, pid, net, mount, ipc] namespaces
+#     # - You should change the root to the rootfs that has been created for the container
+#     # - procfs and sysfs should be mounted within the container for proper isolated execution
+#     #   of processes within the container
+#     # - When unshare process exits all of its children also exit (--kill-child option)
+#     # - permission of root dir within container should be set to 755 for apt to work correctly
+#     # - $INIT_CMD_ARGS should be the entry program for the container
+#     # unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -c \"mount -t proc proc /proc && mount -t sysfs sys /sys && exec $INIT_CMD_ARGS\""
+#     # Subtask 3.d.3
+#     # Modify subtask 3.a.2 to use the overlay filesystem
+#     # unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -i -c 'mount -t proc proc /proc && mount -t sysfs sys /sys && exec \$INIT_CMD_ARGS'"
+#     unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && mount -t proc proc $CONTAINER_ROOTFS/proc && mount -t sysfs sys $CONTAINER_ROOTFS/sys && chroot $CONTAINER_ROOTFS /bin/bash -i"
+
+
+# }
 run() {
     local IMAGE=${1:-}
     local NAME=${2:-}
@@ -318,47 +440,39 @@ run() {
     # Remove on implementation of 3.d.2 <---
 
     # Subtask 3.d.2 - start
-    # Create a new directory for the container rootfs
-    # Read the layer stack from the image directory and mount the overlay filesystem
+    # Create overlay directories for the container rootfs
     mkdir -p "$CONTAINERDIR/$NAME"/{upper,work,merged}
-    LOWER=$(cat "$IMAGEDIR/$IMAGE/layers")
-
-    mount -t overlay overlay -o lowerdir="$LOWER",upperdir="$CONTAINERDIR/$NAME/upper",workdir="$CONTAINERDIR/$NAME/work" "$CONTAINERDIR/$NAME/merged"
-
-
+    local LOWER=$(cat "$IMAGEDIR/$IMAGE/layers")
+    
+    # NEW: Convert LOWER (which may be colon-separated) into a colon-separated list of absolute paths
+    local ABS_LOWER=""
+    IFS=':' read -r -a layer_array <<< "$LOWER"
+    for layer in "${layer_array[@]}"; do
+        local abs_layer
+        abs_layer=$(realpath "$layer")
+        if [ -z "$ABS_LOWER" ]; then
+            ABS_LOWER="$abs_layer"
+        else
+            ABS_LOWER="$ABS_LOWER:$abs_layer"
+        fi
+    done
+    echo "DEBUG: LOWER = $ABS_LOWER"
+    
+    mount -t overlay overlay -o lowerdir="$ABS_LOWER",upperdir="$(realpath "$CONTAINERDIR/$NAME/upper")",workdir="$(realpath "$CONTAINERDIR/$NAME/work")" "$(realpath "$CONTAINERDIR/$NAME/merged")"
     # Subtask 3.d.2 - end
 
     shift 2
-    # this is the init command that should be run within the container
-    local INIT_CMD_ARGS=${@:-/bin/bash -i} # if no command is given, then substitute by /bin/bash
+    # This is the init command that should be run within the container
+    local INIT_CMD_ARGS=${@:-/bin/bash -i}
 
-    # CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/rootfs"
-    # cp -a "$IMAGEDIR/$IMAGE"/* "$CONTAINERDIR/$NAME/rootfs"
-    # Subtask 3.a.1
-    # You should bind mount /dev within the container root fs
-
-    # Subtask 3.d.3
-    # Modify subtask 3.a.1 to bind mount /dev
-    CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/merged"
+    # Subtask 3.a.1: Bind mount /dev within the container
+    local CONTAINER_ROOTFS="$CONTAINERDIR/$NAME/merged"
     mount --bind /dev "$CONTAINER_ROOTFS/dev"
 
-
-    # Subtask 3.a.2
-    # - Use unshare to run the container in a new [uts, pid, net, mount, ipc] namespaces
-    # - You should change the root to the rootfs that has been created for the container
-    # - procfs and sysfs should be mounted within the container for proper isolated execution
-    #   of processes within the container
-    # - When unshare process exits all of its children also exit (--kill-child option)
-    # - permission of root dir within container should be set to 755 for apt to work correctly
-    # - $INIT_CMD_ARGS should be the entry program for the container
-    # unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -c \"mount -t proc proc /proc && mount -t sysfs sys /sys && exec $INIT_CMD_ARGS\""
-    # Subtask 3.d.3
-    # Modify subtask 3.a.2 to use the overlay filesystem
-    # unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && chroot $CONTAINER_ROOTFS /bin/bash -i -c 'mount -t proc proc /proc && mount -t sysfs sys /sys && exec \$INIT_CMD_ARGS'"
+    # Subtask 3.a.2: Use unshare to run the container in isolated namespaces, chrooting into the overlay
     unshare --uts --pid --net --mount --ipc --fork --kill-child bash -c "chmod 755 $CONTAINER_ROOTFS && mount -t proc proc $CONTAINER_ROOTFS/proc && mount -t sysfs sys $CONTAINER_ROOTFS/sys && chroot $CONTAINER_ROOTFS /bin/bash -i"
-
-
 }
+
 
 # This will show containers that are currently running
 show_containers() {

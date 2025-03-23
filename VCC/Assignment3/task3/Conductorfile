@@ -1,2 +1,3 @@
 FROM debian:bookworm
 COPY ./myapp /app
+RUN apt-get update && apt-get install -y curl
