@@ -1,0 +1,5 @@
+FROM debian:bookworm
+# Copy the counter-service directory into /opt/counter-service
+COPY counter-service/ /opt/
+# Run commands to update packages, install build-essential, and compile the counter service
+RUN apt update && apt install -y build-essential && cd /opt/counter-service && make && apt-get clean
