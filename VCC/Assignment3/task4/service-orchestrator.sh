@@ -45,7 +45,7 @@ sudo ./conductor.sh exec cs --  /opt/counter-service/counter-service 8080 1 &
 
 # 7. Within es-cont launch the external service using exec [path to external-service directory within es-cont]/run.sh
 
-sudo ./conductor.sh exec es -- python3 /opt/external-service/app.py "http://$CS_IP:8080/" &
+sudo ./conductor.sh exec es -- python3 /opt/external-service/app.py "http://$CS_IP:8080/" > /dev/null 2>&1  & 
 
 # 8. Within your host system open/curl the url: http://localhost:3000 to verify output of the service
 # 9. On any system which can ping the host system open/curl the url: `http://<host-ip>:3000` to verify

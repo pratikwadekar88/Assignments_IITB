@@ -106,7 +106,7 @@ handle_run() {
     # Check cache
     if [ -d "$CACHEDIR/layers/$layer_hash" ]; then
         echo "Using cached RUN layer: $layer_hash"
-        current_layer="$CACHEDIR/layers/$layer_hash/diff"
+        current_layer="$CACHEDIR/layers/$layer_hash"
         return
     fi
     
@@ -176,7 +176,7 @@ handle_copy() {
     # Lesson: Check in the cache if the layer exists
     if [ -d "$CACHEDIR/layers/$layer_hash" ]; then
         echo "Using cached COPY layer: $layer_hash"
-        current_layer="$CACHEDIR/layers/$layer_hash/diff"
+        current_layer="$CACHEDIR/layers/$layer_hash"
         return
     fi
     
@@ -350,20 +350,7 @@ run() {
 
     local LOWER
     LOWER=$(cat "$IMAGEDIR/$IMAGE/layers")
-    local ABS_LOWER=""
-    IFS=':' read -r -a layer_array <<< "$LOWER"
-    for layer in "${layer_array[@]}"; do
-        local abs_layer
-        abs_layer=$(realpath "$layer")
-        abs_layer=$(echo "$abs_layer" | sed 's|/diff/diff|/diff|g')
-        if [ -z "$ABS_LOWER" ]; then
-            ABS_LOWER="$abs_layer"
-        else
-         ABS_LOWER="$ABS_LOWER:$abs_layer"
-        fi
-    done
-
-    mount -t overlay overlay -o lowerdir="$ABS_LOWER",upperdir="$(realpath "$CONTAINERDIR/$NAME/upper")",workdir="$(realpath "$CONTAINERDIR/$NAME/work")" "$(realpath "$CONTAINERDIR/$NAME/merged")"
+    mount -t overlay overlay -o lowerdir="$LOWER",upperdir="$(realpath "$CONTAINERDIR/$NAME/upper")",workdir="$(realpath "$CONTAINERDIR/$NAME/work")" "$(realpath "$CONTAINERDIR/$NAME/merged")"
  
     
     # Subtask 3.d.2 - end
@@ -436,7 +423,16 @@ stop() {
     fi
 
     # Lesson: Kill the process and unmount unused points
-    [ -z $PID ] || kill -9 $PID
+    # [ -z $PID ] || kill -9 $PID
+
+    # [ -z "$PID" ] || kill -9 "$PID"
+
+    if [ -n "$PID" ]; then
+    for p in $PID; do
+        kill -9 "$p"
+    done
+    fi
+
 
     # Subtask 3.d.3
     # Modify the below code to use the overlay filesystem
@@ -512,295 +508,61 @@ exec() {
 # Subtask 3.c
 # This function is used to setup networking capabilities of containers
 # using tools like iproute2 (ip command), iptables etc.
-# addnetwork() {
-#     local NAME=${1:-}
-#     [ -z "$NAME" ] && die "Container name is required"
-    
-#     # Lesson: This folder within host is used by iproute2 to store 
-#     # the network namespace inode which can be used to operate on that
-#     # network namespace
-#     # 
-#     # If you create a network namespace using iproute2, this folder stores
-#     # link to inode of the created netns. inode of the network namespace is 
-#     # required to be present within this directory to use iproute2 to manipulate 
-#     # network namespace configuration.
-    
-#     # But since we are using unshare to create netns, it will be empty. To 
-#     # use iproutes2, we are manually linking the netns inode unshare created
-#     # within this directory
-
-#     local NETNSDIR="/var/run/netns"
-
-#     if [ ! -e $NETNSDIR ]; then
-#         mkdir -p $NETNSDIR
-#     fi
-
-#     # Subtask 3.d.3
-#     # Modify the below code to use the overlay filesystem (Use only one pid)
-#     # local PID=$(ps -ef | grep "$CONTAINERDIR/$NAME/rootfs" | grep -v grep | awk '{print $2}')
-#     local PID=$(ps -ef | grep "unshare"| grep "$CONTAINERDIR/$NAME/merged" | grep -v grep | awk '{print $2}')
-
-#     # local CONDUCTORNS="/proc/$PID/ns/net"
-#     # local NSDIR=$NETNSDIR/$NAME
-
-#     # if [ -e CONDUCTORNS ]; then
-# 	#     rm $NSDIR
-#     # fi
-#     # ln -sf $CONDUCTORNS $NSDIR
-
-#     if [ -e "$NSDIR" ]; then
-#         rm -f "$NSDIR"  # Change: Remove existing symlink if it exists.
-#     fi
-#     ln -sf "$CONDUCTORNS" "$NSDIR"
-
-#     # Finally we can use iproute2 for configuring network within our network namespace
-#     local NUM=$(get_next_num "$NAME") # Getting unique interface identifier
-
-#     # Building the ip address for the link
-#     [ -z "$IP4_PREFIX" ] && IP4_PREFIX="${IP4_SUBNET}.$((0x$NUM))." 
-
-#     INSIDE_IP4="${IP4_PREFIX}2"
-#     OUTSIDE_IP4="${IP4_PREFIX}1"
-#     INSIDE_PEER="${NAME}-inside"
-#     OUTSIDE_PEER="${NAME}-outside"
-
-#     # Subtask 3.c.1
-#     # Add a veth links (It is a peer link connecting two points) connecting the container's network 
-#     # namespace to the root(host) namespace. The veth link will have two interfaces.
-#     # Inside the container, it should use INSIDE_PEER interface and within the host it should use
-#     # OUTSIDE_PEER interface
-#     # You should use iproute2 tool (ip command)
-
-#     if ip link show "$INSIDE_PEER" &>/dev/null; then
-#         ip link delete "$INSIDE_PEER"   
-#     fi
-#     if ip link show "$OUTSIDE_PEER" &>/dev/null; then
-#         ip link delete "$OUTSIDE_PEER"  
-#     fi
-
-#     ip link add "$INSIDE_PEER" type veth peer name "$OUTSIDE_PEER"
-#     ip link set "$INSIDE_PEER" netns "$NAME"
-#     ip addr add "$OUTSIDE_IP4"/"$IP4_PREFIX_SIZE" dev "$OUTSIDE_PEER"
-#     ip link set "$OUTSIDE_PEER" up
-
-
-#     # Lesson: By default linux does not forward packets, it only acts as an end host
-#     # We need to enable packet forwarding capability to forward packets to our containers
-#     echo 1 > /proc/sys/net/ipv4/ip_forward
-
-#     # Subtask 3.c.2
-#     # Enable the interfaces that you have created within the host and the container
-#     # You should also enable lo interface within the container (which is disabled by default)
-#     # In total here 3 interfaces should be enabled
-#     ip netns exec "$NAME" ip addr add "$INSIDE_IP4"/"$IP4_PREFIX_SIZE" dev "$INSIDE_PEER"
-#     ip netns exec "$NAME" ip link set "$INSIDE_PEER" up
-#     ip netns exec "$NAME" ip link set lo up
-
-
-#     # Lesson: Configuring addresses and adding routes for the container in the routing table
-#     # according to the addressing conventions selected above
-#     # ip addr add dev "$OUTSIDE_PEER" "${OUTSIDE_IP4}/${IP4_PREFIX_SIZE}"
-#     # ip -n "$NAME" addr add dev "$INSIDE_PEER" "${INSIDE_IP4}/${IP4_PREFIX_SIZE}"
-#     # ip -n "$NAME" route add "${IP4_SUBNET}/${IP4_FULL_PREFIX_SIZE}" via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
-#     ip -n "$NAME" addr add dev "$INSIDE_PEER" "${INSIDE_IP4}/${IP4_PREFIX_SIZE}"
-#     ip -n "$NAME" route add "${IP4_SUBNET}/${IP4_FULL_PREFIX_SIZE}" via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
-
-
-
-#     echo -n "Setting up network '$NAME' with peer ip ${INSIDE_IP4}." || echo "."
-#     echo " Waiting for interface configuration to settle..."
-#     echo ""
-#     # Following command will wait for the link to be ready
-#     wait_for_dev "$OUTSIDE_PEER" && wait_for_dev "$INSIDE_PEER" "$NAME"
-
-#     # In the above configuration we only addressed the communication channel between
-#     # the container veth interface to the host veth interface. In order to access external
-#     # network from the host, packets need to be routed to the external network through host.
-#     # The Host will act like a NAT router for the container traffic.
-#     if [ "$INTERNET" -eq "1" ]; then
-#         # Lesson: Making host the default gateway for all packets sent to veth interface with the container
-#         ip -n "$NAME" route add default via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
-        
-#         # Lesson: This iptable rule will do NAT translation for all packets having source IP same as the 
-#         # ip of the container
-#         iptables -t nat -A POSTROUTING -s "${INSIDE_IP4}/${IP4_PREFIX_SIZE}" -o ${DEFAULT_IFC} -j MASQUERADE
-
-#         # Lesson: All packets to be forwarded to and fro between default public interface and outside veth interface 
-#         iptables -A FORWARD -i ${DEFAULT_IFC} -o ${OUTSIDE_PEER} -j ACCEPT
-#         iptables -A FORWARD -i ${OUTSIDE_PEER} -o ${DEFAULT_IFC} -j ACCEPT
-
-#         # Lesson: Setting DNS server statically as per IITB norms
-#         cp /etc/resolv.conf /etc/resolv.conf.old
-#         echo "nameserver 8.8.8.8" > /etc/resolv.conf
-#         echo "Internet Configured..."
-#     fi
-    
-#     # We are exposing a port within the container to be accessible from the public interface
-#     # Any TCP packet received on the OUTER_PORT of host will be forwarded to the INNER_PORT within
-#     # the container. This is done to expose a service running within the container to the public
-#     if [ "$EXPOSE" -eq "1" ]; then
-#         # Lesson: This iptable rule will replace the ip address and port of any TCP packet received on default interface 
-#         # destined to OUTER_PORT
-#         iptables -t nat -A PREROUTING -p tcp -i ${DEFAULT_IFC} --dport ${OUTER_PORT} -j DNAT --to-destination ${INSIDE_IP4}:${INNER_PORT}
-#         # Lesson: The above rule will only route packets received on the external interface. As a result
-#         # curl <host-self-ip>:port will not work within the host itself.
-#         # This iptable rule will redirect packets generated 
-#         # within the host with destination set as hostip:OUTER_PORT to the containers:INNER_PORT. 
-#         # This will still not work for localhost/127.0.0.1. You will have to send using the host-ip
-#         iptables -t nat -A OUTPUT -o lo -m addrtype --src-type LOCAL --dst-type LOCAL -p tcp --dport ${OUTER_PORT} -j DNAT --to-destination ${INSIDE_IP4}:${INNER_PORT}
-#         # Lesson: Allows forwarding of TCP session initiator packets from the public to the container
-#         iptables -A FORWARD -p tcp -d ${INSIDE_IP4} --dport ${INNER_PORT} -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
-#         echo "Port ${INNER_PORT} exposed to ${OUTER_PORT}..."
-#     fi
-
-#     rm -rf $NETNSDIR
-#     echo "Network setup complete..."
-# }
-# addnetwork() {
-#     local NAME=${1:-}
-#     [ -z "$NAME" ] && die "Container name is required"
-    
-#     echo "DEBUG: Starting addnetwork for container: $NAME"
-    
-#     local NETNSDIR="/var/run/netns"
-#     if [ ! -e "$NETNSDIR" ]; then
-#         echo "DEBUG: Creating network namespace directory $NETNSDIR"
-#         mkdir -p "$NETNSDIR"
-#     fi
-
-#     # Get the PID of the unshare process associated with the container
-#     local PID
-#     PID=$(ps -ef | grep "unshare" | grep "$CONTAINERDIR/$NAME/merged" | grep -v grep | awk '{print $2}')
-#     echo "DEBUG: Found unshare PID: $PID"
-
-#     local CONDUCTORNS="/proc/$PID/ns/net"
-#     local NSDIR="$NETNSDIR/$NAME"
-
-#     if [ -e "$NSDIR" ]; then
-#         echo "DEBUG: Removing existing netns symlink $NSDIR"
-#         rm -f "$NSDIR"
-#     fi
-#     echo "DEBUG: Creating symlink $NSDIR -> $CONDUCTORNS"
-#     ln -sf "$CONDUCTORNS" "$NSDIR"
-
-#     # Get a unique number for IP addressing
-#     local NUM
-#     NUM=$(get_next_num "$NAME")
-#     echo "DEBUG: Unique number from get_next_num: $NUM"
-
-#     [ -z "$IP4_PREFIX" ] && IP4_PREFIX="${IP4_SUBNET}.$((0x$NUM))."
-#     echo "DEBUG: IP4_PREFIX set to: $IP4_PREFIX"
-
-#     INSIDE_IP4="${IP4_PREFIX}2"
-#     OUTSIDE_IP4="${IP4_PREFIX}1"
-#     INSIDE_PEER="${NAME}-inside"
-#     OUTSIDE_PEER="${NAME}-outside"
-#     echo "DEBUG: INSIDE_IP4: $INSIDE_IP4, OUTSIDE_IP4: $OUTSIDE_IP4"
-#     echo "DEBUG: INSIDE_PEER: $INSIDE_PEER, OUTSIDE_PEER: $OUTSIDE_PEER"
-
-#     echo "DEBUG: Adding veth pair: $INSIDE_PEER <--> $OUTSIDE_PEER"
-
-#     # Check if either interface already exists, and if so, delete them
-#     if ip link show "$INSIDE_PEER" &>/dev/null; then
-#         echo "DEBUG: Interface $INSIDE_PEER exists. Deleting it..."
-#         ip link delete "$INSIDE_PEER"
-#     fi
-#     if ip link show "$OUTSIDE_PEER" &>/dev/null; then
-#         echo "DEBUG: Interface $OUTSIDE_PEER exists. Deleting it..."
-#         ip link delete "$OUTSIDE_PEER"
-#     fi
-
-#     # Now add the veth pair
-#     ip link add "$INSIDE_PEER" type veth peer name "$OUTSIDE_PEER" || { echo "ERROR: Failed to add veth pair"; exit 1; }
-    
-#     echo "DEBUG: Setting interface $INSIDE_PEER to container namespace: $NAME"
-#     ip link set "$INSIDE_PEER" netns "$NAME"
-    
-#     echo "DEBUG: Assigning IP $OUTSIDE_IP4/$IP4_PREFIX_SIZE to $OUTSIDE_PEER in host namespace"
-#     ip addr add "$OUTSIDE_IP4"/"$IP4_PREFIX_SIZE" dev "$OUTSIDE_PEER"
-    
-#     echo "DEBUG: Bringing interface $OUTSIDE_PEER up"
-#     ip link set "$OUTSIDE_PEER" up
-
-#     echo "DEBUG: Enabling IP forwarding on host"
-#     echo 1 > /proc/sys/net/ipv4/ip_forward
-
-#     echo "DEBUG: Configuring container namespace: Assigning IP $INSIDE_IP4/$IP4_PREFIX_SIZE to $INSIDE_PEER"
-#     ip netns exec "$NAME" ip addr add "$INSIDE_IP4"/"$IP4_PREFIX_SIZE" dev "$INSIDE_PEER"
-    
-#     echo "DEBUG: Bringing up interface $INSIDE_PEER in container namespace"
-#     ip netns exec "$NAME" ip link set "$INSIDE_PEER" up
-    
-#     echo "DEBUG: Bringing up loopback interface in container namespace"
-#     ip netns exec "$NAME" ip link set lo up
-
-#     # Remove duplicate assignment: ip -n "$NAME" addr add dev "$INSIDE_PEER" "${INSIDE_IP4}/${IP4_PREFIX_SIZE}"
-    
-#     echo "DEBUG: Adding route in container namespace for ${IP4_SUBNET}/${IP4_FULL_PREFIX_SIZE} via $OUTSIDE_IP4"
-#     ip -n "$NAME" route add "${IP4_SUBNET}/${IP4_FULL_PREFIX_SIZE}" via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
-
-#     echo "DEBUG: Waiting for interfaces to settle..."
-#     wait_for_dev "$OUTSIDE_PEER" && wait_for_dev "$INSIDE_PEER" "$NAME"
-
-#     if [ "$INTERNET" -eq "1" ]; then
-#         echo "DEBUG: Setting default route in container namespace for Internet access via $OUTSIDE_IP4"
-#         ip -n "$NAME" route add default via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
-        
-#         echo "DEBUG: Adding iptables MASQUERADE rule for ${INSIDE_IP4}/${IP4_PREFIX_SIZE} on interface ${DEFAULT_IFC}"
-#         iptables -t nat -A POSTROUTING -s "${INSIDE_IP4}/${IP4_PREFIX_SIZE}" -o "${DEFAULT_IFC}" -j MASQUERADE
-        
-#         echo "DEBUG: Adding iptables FORWARD rule: ${DEFAULT_IFC} -> ${OUTSIDE_PEER}"
-#         iptables -A FORWARD -i "${DEFAULT_IFC}" -o "${OUTSIDE_PEER}" -j ACCEPT
-        
-#         echo "DEBUG: Adding iptables FORWARD rule: ${OUTSIDE_PEER} -> ${DEFAULT_IFC}"
-#         iptables -A FORWARD -i "${OUTSIDE_PEER}" -o "${DEFAULT_IFC}" -j ACCEPT
-
-#         echo "DEBUG: Backing up current resolv.conf and setting DNS to 8.8.8.8"
-#         cp /etc/resolv.conf /etc/resolv.conf.old
-#         echo "nameserver 8.8.8.8" > /etc/resolv.conf
-#         echo "DEBUG: Internet Configured..."
-#     fi
-
-#     if [ "$EXPOSE" -eq "1" ]; then
-#         echo "DEBUG: Adding iptables rules for port exposure"
-#         iptables -t nat -A PREROUTING -p tcp -i "${DEFAULT_IFC}" --dport "${OUTER_PORT}" -j DNAT --to-destination "${INSIDE_IP4}:${INNER_PORT}"
-#         iptables -t nat -A OUTPUT -o lo -m addrtype --src-type LOCAL --dst-type LOCAL -p tcp --dport "${OUTER_PORT}" -j DNAT --to-destination "${INSIDE_IP4}:${INNER_PORT}"
-#         iptables -A FORWARD -p tcp -d "${INSIDE_IP4}" --dport "${INNER_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
-#         echo "DEBUG: Port ${INNER_PORT} exposed to ${OUTER_PORT}"
-#     fi
-
-#     echo "DEBUG: Removing netns symlink directory $NETNSDIR"
-#     rm -rf "$NETNSDIR"
-#     echo "DEBUG: Network setup complete for container '$NAME'."
-# }
-
 addnetwork() {
     local NAME=${1:-}
     [ -z "$NAME" ] && die "Container name is required"
+    
+    # Lesson: This folder within host is used by iproute2 to store 
+    # the network namespace inode which can be used to operate on that
+    # network namespace
+    # 
+    # If you create a network namespace using iproute2, this folder stores
+    # link to inode of the created netns. inode of the network namespace is 
+    # required to be present within this directory to use iproute2 to manipulate 
+    # network namespace configuration.
+    
+    # But since we are using unshare to create netns, it will be empty. To 
+    # use iproutes2, we are manually linking the netns inode unshare created
+    # within this directory
 
     local NETNSDIR="/var/run/netns"
-    [ ! -e "$NETNSDIR" ] && mkdir -p "$NETNSDIR"
 
-    # Get the PID of the unshare process associated with the container
+    if [ ! -e $NETNSDIR ]; then
+        mkdir -p $NETNSDIR
+    fi
+
+    # Subtask 3.d.3
+    # Modify the below code to use the overlay filesystem (Use only one pid)
     local PID
     PID=$(ps -ef | grep "unshare" | grep "$CONTAINERDIR/$NAME/merged" | grep -v grep | awk '{print $2}')
-
     local CONDUCTORNS="/proc/$PID/ns/net"
-    local NSDIR="$NETNSDIR/$NAME"
+    local NSDIR=$NETNSDIR/$NAME
+
     [ -e "$NSDIR" ] && rm -f "$NSDIR"
+
+    # if [ -e CONDUCTORNS ]; then
+	#     rm $NSDIR
+    # fi
+    # ln -sf $CONDUCTORNS $NSDIR
     ln -sf "$CONDUCTORNS" "$NSDIR"
 
-    # Get a unique number for IP addressing
-    local NUM
-    NUM=$(get_next_num "$NAME")
-    [ -z "$IP4_PREFIX" ] && IP4_PREFIX="${IP4_SUBNET}.$((0x$NUM))."
+    # Finally we can use iproute2 for configuring network within our network namespace
+    local NUM=$(get_next_num "$NAME") # Getting unique interface identifier
+
+    # Building the ip address for the link
+    [ -z "$IP4_PREFIX" ] && IP4_PREFIX="${IP4_SUBNET}.$((0x$NUM))." 
 
     INSIDE_IP4="${IP4_PREFIX}2"
     OUTSIDE_IP4="${IP4_PREFIX}1"
     INSIDE_PEER="${NAME}-inside"
     OUTSIDE_PEER="${NAME}-outside"
 
-    # Delete pre-existing veth interfaces if they exist
+    # Subtask 3.c.1
+    # Add a veth links (It is a peer link connecting two points) connecting the container's network 
+    # namespace to the root(host) namespace. The veth link will have two interfaces.
+    # Inside the container, it should use INSIDE_PEER interface and within the host it should use
+    # OUTSIDE_PEER interface
+    # You should use iproute2 tool (ip command)
     if ip link show "$INSIDE_PEER" &>/dev/null; then
         ip link delete "$INSIDE_PEER"
     fi
@@ -808,37 +570,79 @@ addnetwork() {
         ip link delete "$OUTSIDE_PEER"
     fi
 
-    # Add the veth pair and move one end to container's namespace
-    ip link add "$INSIDE_PEER" type veth peer name "$OUTSIDE_PEER" || { die "Failed to add veth pair"; }
+    ip link add "$INSIDE_PEER" type veth peer name "$OUTSIDE_PEER"
     ip link set "$INSIDE_PEER" netns "$NAME"
     ip addr add "$OUTSIDE_IP4"/"$IP4_PREFIX_SIZE" dev "$OUTSIDE_PEER"
     ip link set "$OUTSIDE_PEER" up
 
+
+    # Lesson: By default linux does not forward packets, it only acts as an end host
+    # We need to enable packet forwarding capability to forward packets to our containers
     echo 1 > /proc/sys/net/ipv4/ip_forward
 
+    # Subtask 3.c.2
+    # Enable the interfaces that you have created within the host and the container
+    # You should also enable lo interface within the container (which is disabled by default)
+    # In total here 3 interfaces should be enabled
     ip netns exec "$NAME" ip addr add "$INSIDE_IP4"/"$IP4_PREFIX_SIZE" dev "$INSIDE_PEER"
     ip netns exec "$NAME" ip link set "$INSIDE_PEER" up
     ip netns exec "$NAME" ip link set lo up
 
+
+    # Lesson: Configuring addresses and adding routes for the container in the routing table
+    # according to the addressing conventions selected above
+    
     ip -n "$NAME" route add "${IP4_SUBNET}/${IP4_FULL_PREFIX_SIZE}" via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
+    
+    echo -n "Setting up network '$NAME' with peer ip ${INSIDE_IP4}." || echo "."
+    echo " Waiting for interface configuration to settle..."
+    echo ""
+    # Following command will wait for the link to be ready
     wait_for_dev "$OUTSIDE_PEER" && wait_for_dev "$INSIDE_PEER" "$NAME"
 
+    # In the above configuration we only addressed the communication channel between
+    # the container veth interface to the host veth interface. In order to access external
+    # network from the host, packets need to be routed to the external network through host.
+    # The Host will act like a NAT router for the container traffic.
     if [ "$INTERNET" -eq "1" ]; then
+
+        # Lesson: Making host the default gateway for all packets sent to veth interface with the container
         ip -n "$NAME" route add default via "$OUTSIDE_IP4" dev "$INSIDE_PEER"
-        iptables -t nat -A POSTROUTING -s "${INSIDE_IP4}/${IP4_PREFIX_SIZE}" -o "${DEFAULT_IFC}" -j MASQUERADE
-        iptables -A FORWARD -i "${DEFAULT_IFC}" -o "${OUTSIDE_PEER}" -j ACCEPT
-        iptables -A FORWARD -i "${OUTSIDE_PEER}" -o "${DEFAULT_IFC}" -j ACCEPT
+        
+        # Lesson: This iptable rule will do NAT translation for all packets having source IP same as the 
+        # ip of the container
+        iptables -t nat -A POSTROUTING -s "${INSIDE_IP4}/${IP4_PREFIX_SIZE}" -o ${DEFAULT_IFC} -j MASQUERADE
+
+        # Lesson: All packets to be forwarded to and fro between default public interface and outside veth interface 
+        iptables -A FORWARD -i ${DEFAULT_IFC} -o ${OUTSIDE_PEER} -j ACCEPT
+        iptables -A FORWARD -i ${OUTSIDE_PEER} -o ${DEFAULT_IFC} -j ACCEPT
+
+        # Lesson: Setting DNS server statically as per IITB norms
         cp /etc/resolv.conf /etc/resolv.conf.old
         echo "nameserver 8.8.8.8" > /etc/resolv.conf
+        echo "Internet Configured..."
     fi
-
+    
+    # We are exposing a port within the container to be accessible from the public interface
+    # Any TCP packet received on the OUTER_PORT of host will be forwarded to the INNER_PORT within
+    # the container. This is done to expose a service running within the container to the public
     if [ "$EXPOSE" -eq "1" ]; then
-        iptables -t nat -A PREROUTING -p tcp -i "${DEFAULT_IFC}" --dport "${OUTER_PORT}" -j DNAT --to-destination "${INSIDE_IP4}:${INNER_PORT}"
-        iptables -t nat -A OUTPUT -o lo -m addrtype --src-type LOCAL --dst-type LOCAL -p tcp --dport "${OUTER_PORT}" -j DNAT --to-destination "${INSIDE_IP4}:${INNER_PORT}"
-        iptables -A FORWARD -p tcp -d "${INSIDE_IP4}" --dport "${INNER_PORT}" -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+        # Lesson: This iptable rule will replace the ip address and port of any TCP packet received on default interface 
+        # destined to OUTER_PORT
+        iptables -t nat -A PREROUTING -p tcp -i ${DEFAULT_IFC} --dport ${OUTER_PORT} -j DNAT --to-destination ${INSIDE_IP4}:${INNER_PORT}
+        # Lesson: The above rule will only route packets received on the external interface. As a result
+        # curl <host-self-ip>:port will not work within the host itself.
+        # This iptable rule will redirect packets generated 
+        # within the host with destination set as hostip:OUTER_PORT to the containers:INNER_PORT. 
+        # This will still not work for localhost/127.0.0.1. You will have to send using the host-ip
+        iptables -t nat -A OUTPUT -o lo -m addrtype --src-type LOCAL --dst-type LOCAL -p tcp --dport ${OUTER_PORT} -j DNAT --to-destination ${INSIDE_IP4}:${INNER_PORT}
+        # Lesson: Allows forwarding of TCP session initiator packets from the public to the container
+        iptables -A FORWARD -p tcp -d ${INSIDE_IP4} --dport ${INNER_PORT} -m state --state NEW,ESTABLISHED,RELATED -j ACCEPT
+        echo "Port ${INNER_PORT} exposed to ${OUTER_PORT}..."
     fi
 
-    rm -rf "$NETNSDIR"
+    rm -rf $NETNSDIR
+    echo "Network setup complete..."
 }
 
 
