@@ -3,7 +3,7 @@
 ## You need to modify this as per your system, 
 ## This should be the interface of your system connecting 
 ## to internet. 
-DEFAULT_IFC=enp0s3
+DEFAULT_IFC=enp0s3 
 
 
 # These are the configuration files that you may modify
